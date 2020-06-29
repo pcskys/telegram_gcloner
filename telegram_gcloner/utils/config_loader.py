@@ -17,11 +17,10 @@ class _Config:
         self._log_file = ''
         self._telegram_token = None
         self._path_to_gclone = None
-        self._key_string_folder_id = ''
-        self._key_string_message_id = ''
         self._user_ids = ''
         self._group_ids = ''
         self._base_path = os.path.dirname(os.path.dirname(__file__))
+        self.TIMER_TO_DELETE_MESSAGE = 10
 
     def load_config(self):
         logger.debug('Loading config')
@@ -42,7 +41,6 @@ class _Config:
         config_general = config_file['General']
 
         config_general_keywords_str = [
-            'path_to_gclone',
             'telegram_token',
             'user_ids',
             'group_ids',
@@ -50,6 +48,7 @@ class _Config:
         ]
 
         self.get_config_from_section('str', config_general_keywords_str, config_general)
+        self.get_config_from_section('str', ['path_to_gclone'], config_general, optional=True)
 
         self._user_ids = [int(item) for item in self._user_ids.split(',')]
         self._group_ids = [int(item) for item in self._group_ids.split(',')]
@@ -68,7 +67,7 @@ class _Config:
             sys.exit(0)
         logger.info('Found token: ' + self._telegram_token)
 
-    def get_config_from_section(self, var_type, keywords, section):
+    def get_config_from_section(self, var_type, keywords, section, optional=False):
         for item in keywords:
             if var_type == 'int':
                 value = section.getint(item, 0)
@@ -78,7 +77,7 @@ class _Config:
                 value = section.getboolean(item, False)
             else:
                 raise TypeError
-            if not value and value is not False:
+            if not optional and not value and value is not False:
                 logger.warning('{} is not provided.'.format(item))
                 input("Press Enter to continue...")
                 sys.exit(1)

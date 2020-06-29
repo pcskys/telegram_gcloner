@@ -3,12 +3,11 @@
 import html
 import logging
 import re
-import threading
 
 from telegram import ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Dispatcher, CallbackQueryHandler
 
-from utils.fire_save_files import fire_save_files
+from utils.fire_save_files import MySaveFileThread, thread_pool
 from utils.google_drive import GoogleDrive
 from utils.helper import parse_folder_id_from_url, alert_users, get_inline_keyboard_pagination_data, simplified_path
 
@@ -61,15 +60,12 @@ def parse_entity_for_drive_id(message):
 def process_drive_links(update, context):
     if not update.message:
         return
-    # if update.message.chat.id not in config.USER_IDS:
-    #     logger.debug('Ignore message from {0}.'.format(update.message.chat.id))
-    #     return
 
     folder_ids = parse_entity_for_drive_id(update.message)
 
     if not folder_ids:
         return
-    message = '检测到以下文件：'
+    message = '检测到以下文件：\n'
 
     try:
         gd = GoogleDrive(update.effective_user.id)
@@ -103,13 +99,20 @@ def process_drive_links(update, context):
     else:
         inline_keyboard_drive_ids = [[InlineKeyboardButton(text='未收藏团队盘，先收藏才能操作。', callback_data='#')]]
     inline_keyboard = inline_keyboard_drive_ids
-    update.message.reply_text(message, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard))
+    update.message.reply_text(message, parse_mode=ParseMode.HTML,
+                              disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(inline_keyboard))
 
 
 def save_to_folder_page(update, context):
     callback_query_prefix = 'save_to_folder'
 
     query = update.callback_query
+    if query.message.chat_id < 0 and \
+            (not query.message.reply_to_message or
+             query.from_user.id != query.message.reply_to_message.from_user.id):
+        alert_users(context, update.effective_user, 'invalid caller', query.data)
+        query.answer(text='哟呵', show_alert=True)
+        return
     match = re.search(r'^save_to_folder_page#(\d+)$', query.data)
     if not match:
         alert_users(context, update.effective_user, 'invalid query data', query.data)
@@ -136,7 +139,12 @@ def save_to_folder_page(update, context):
 
 def save_to_folder(update, context):
     query = update.callback_query
-
+    if query.message.chat_id < 0 and \
+            (not query.message.reply_to_message or
+             query.from_user.id != query.message.reply_to_message.from_user.id):
+        alert_users(context, update.effective_user, 'invalid caller', query.data)
+        query.answer(text='哟呵', show_alert=True)
+        return
     match = re.search(r'^save_to_folder(?:_page#[\d]+)?,\s*([\dA-Za-z\-_]+)$', query.data)
     fav_folders = context.user_data.get(udkey_folders, {})
     if not match or match.group(1) not in fav_folders:
@@ -154,7 +162,10 @@ def save_to_folder(update, context):
         return
     dest_folder = fav_folders[match.group(1)]
     dest_folder['folder_id'] = match.group(1)
-    t = threading.Thread(target=fire_save_files, args=(update, context, folder_ids, text, dest_folder))
+    if not thread_pool.get(update.effective_user.id, None):
+        thread_pool[update.effective_user.id] = []
+    t = MySaveFileThread(args=(update, context, folder_ids, text, dest_folder))
+    thread_pool[update.effective_user.id].append(t)
     t.start()
     query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(
         [[InlineKeyboardButton(text='已执行', callback_data='#')]]))

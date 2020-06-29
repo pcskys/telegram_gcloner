@@ -109,7 +109,7 @@ def main():
                                         store_bot_data=True,
                                         store_user_data=True,
                                         store_chat_data=False)
-    q = mq.MessageQueue(all_burst_limit=3, all_time_limit_ms=3000)
+    q = mq.MessageQueue()
     request = TGRequest(con_pool_size=8)
     my_bot = MQBot(config.TELEGRAM_TOKEN, request=request, mqueue=q)
     updater = Updater(bot=my_bot, use_context=True, persistence=telegram_pickle)
@@ -125,7 +125,7 @@ def init_logger():
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
     console_logger = logging.StreamHandler()
-    console_logger.setLevel(logging.DEBUG)
+    console_logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     console_logger.setFormatter(formatter)
     root_logger.addHandler(console_logger)
@@ -191,20 +191,27 @@ def error(update, context):
     # normally, we always have an user. If not, its either a channel or a poll update.
     if update.effective_user:
         payload += f' with the user ' \
-                   f'{mention_html(update.effective_user.id, html.escape(update.effective_user.first_name))}'
+                   f'{mention_html(update.effective_user.id, html.escape(update.effective_user.first_name))} '
     # there are more situations when you don't get a chat
     if update.effective_chat:
         if update.effective_chat.title:
             payload += f' within the chat <i>{html.escape(update.effective_chat.title)}</i>'
         if update.effective_chat.username:
-            payload += f' (@{update.effective_chat.username})'
+            payload += f' (@{update.effective_chat.username}, {update.effective_chat.id})'
     # but only one where you have an empty payload by now: A poll (buuuh)
     if update.poll:
         payload += f' with the poll id {update.poll.id}.'
+
+    context_error = str(context.error)
     # lets put this in a "well" formatted text
-    text = f"Hey.\n The error <code>{html.escape(str(context.error))}</code> happened{str(payload)}. " \
+    text = f"Hey.\n The error <code>{html.escape(context_error)}</code> happened{str(payload)}. " \
            f"The full traceback:\n\n<code>{html.escape(str(trace))}" \
            f"</code>"
+
+    # ignore message is not modified error from telegram
+    if 'Message is not modified' in context_error:
+        raise
+
     # and send it to the dev(s)
     for dev_id in devs:
         context.bot.send_message(dev_id, text, parse_mode=ParseMode.HTML)
